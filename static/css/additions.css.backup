@@ -1,0 +1,479 @@
+/* ===================================================================
+ *  STYLES ADDITIONNELS POUR LES CORRECTIONS (11 DÉC 2024)
+ * =================================================================== */
+
+/* B) AUTO-COMPLÉTION */
+#autocompleteResults {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+}
+
+.autocomplete-item {
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    border-bottom: 1px solid #f5f5f5;
+    /* FIX: Texte NOIR sur fond blanc */
+    color: #2c3e50;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.autocomplete-item:hover {
+    background: #667eea;
+    color: white;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+/* Conteneur parent pour le positionnement */
+.search-panel {
+    position: relative;
+}
+
+#searchInput {
+    position: relative;
+    z-index: 1;
+}
+
+/* C) CARTES PATIENTS AMÉLIORÉES (6-7 CHAMPS) */
+.patient-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    animation: fadeInUp 0.4s ease;
+}
+
+.patient-card:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+.patient-card .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.patient-card .header h4 {
+    margin: 0;
+    color: #2c3e50;
+    font-size: 1.5rem; /* Augmenté de 1.3rem */
+    font-weight: 600;
+}
+
+.patient-card .age-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 8px 16px; /* Augmenté */
+    border-radius: 20px;
+    font-size: 1.05rem; /* Augmenté de 0.9rem */
+    font-weight: 600;
+}
+
+.patient-card .details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.patient-card .details p {
+    margin: 0;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    font-size: 1.05rem; /* Augmenté de 0.95rem */
+    line-height: 1.5;
+}
+
+.patient-card .details p b {
+    color: #495057;
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.9rem; /* Augmenté de 0.85rem */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+}
+
+.patient-card .actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.patient-card .actions .button {
+    flex: 1;
+    min-width: 110px;
+    padding: 12px 18px; /* Augmenté */
+    border-radius: 8px;
+    font-size: 1rem; /* Augmenté de 0.9rem */
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.patient-card .actions .button.small {
+    background: #667eea;
+    color: white;
+}
+
+.patient-card .actions .button.small:hover {
+    background: #5568d3;
+    transform: translateY(-1px);
+}
+
+.patient-card .actions .button.stroke {
+    background: white;
+    border: 2px solid #667eea;
+    color: #667eea;
+}
+
+.patient-card .actions .button.stroke:hover {
+    background: #667eea;
+    color: white;
+}
+
+/* D) BOUTON SUPPRIMER */
+.patient-card .actions .button.danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.patient-card .actions .button.danger:hover {
+    background: #c0392b;
+    transform: translateY(-1px);
+}
+
+/* RÉSULTATS VECTORIELS */
+.vector-result-card {
+    background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+    border: 2px solid #667eea30;
+    border-radius: 12px;
+    padding: 24px; /* Augmenté */
+    margin-bottom: 18px;
+    animation: fadeInUp 0.4s ease;
+}
+
+.vector-result-card .result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.vector-result-card .result-header h4 {
+    font-size: 1.4rem; /* NOUVEAU */
+    margin: 0;
+    color: #2c3e50;
+}
+
+.vector-result-card .similarity-badge {
+    background: #667eea;
+    color: white;
+    padding: 8px 16px; /* Augmenté */
+    border-radius: 20px;
+    font-size: 1rem; /* Augmenté de 0.85rem */
+    font-weight: 600;
+}
+
+.vector-result-card .result-details {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.vector-result-card .result-details p {
+    margin: 0;
+    padding: 12px; /* Augmenté */
+    background: white;
+    border-radius: 6px;
+    font-size: 1.05rem; /* Augmenté de 0.9rem */
+    line-height: 1.5;
+}
+
+.vector-result-card .result-details p b {
+    font-weight: 700;
+    color: #495057;
+}
+
+.risk-Élevé {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
+.risk-Modéré {
+    color: #f39c12;
+    font-weight: 600;
+}
+
+/* EDF AVEC INTERPRÉTATION */
+.edf-result {
+    animation: fadeInUp 0.5s ease;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.stat-item {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 16px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #2c3e50;
+}
+
+/* INTERPRÉTATION BOX */
+.interpretation-box {
+    background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
+    border-left: 4px solid #667eea;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.interpretation-box h4 {
+    margin: 0 0 12px 0;
+    color: #667eea;
+    font-size: 1.1rem;
+}
+
+.interpretation-text {
+    line-height: 1.8;
+    color: #2c3e50;
+    font-size: 0.95rem;
+}
+
+/* SÉLECTEUR EDF - FIX COULEUR */
+#edfVariable {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 1rem;
+    background: white; /* FIX: était transparent/blanc */
+    color: #2c3e50; /* FIX: couleur du texte visible */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+#edfVariable:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+#edfVariable option {
+    background: white;
+    color: #2c3e50;
+    padding: 10px;
+}
+
+/* LOADING SPINNER */
+.loading-spinner {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    margin: 0 auto 20px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ERROR MESSAGE */
+.error-message {
+    background: #fee;
+    border-left: 4px solid #e74c3c;
+    padding: 16px 20px;
+    border-radius: 8px;
+    color: #c0392b;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: fadeInUp 0.3s ease;
+}
+
+.error-message i {
+    font-size: 1.5rem;
+}
+
+/* NO RESULTS */
+.no-results {
+    text-align: center;
+    padding: 40px 20px;
+    color: #95a5a6;
+    font-size: 1.1rem;
+}
+
+/* PLACEHOLDER */
+.placeholder {
+    text-align: center;
+    padding: 40px 20px;
+    color: #bdc3c7;
+    font-style: italic;
+}
+
+/* ANIMATIONS */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+    .patient-card .details {
+        grid-template-columns: 1fr;
+    }
+
+    .patient-card .actions {
+        flex-direction: column;
+    }
+
+    .patient-card .actions .button {
+        width: 100%;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .vector-result-card .result-details {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* SWAL2 CUSTOM STYLES */
+.swal2-popup {
+    border-radius: 12px !important;
+}
+
+.swal2-input, .swal2-select {
+    margin: 8px 0 !important;
+    border: 2px solid #e0e0e0 !important;
+    border-radius: 6px !important;
+}
+
+.swal2-input:focus, .swal2-select:focus {
+    border-color: #667eea !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+}
+
+/* CLUSTER BUTTONS */
+.cluster-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.cluster-btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px 20px;
+    background: white;
+    border: 2px solid #667eea;
+    color: #667eea;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 600;
+}
+
+.cluster-btn:hover {
+    background: #667eea;
+    color: white;
+    transform: translateY(-2px);
+}
+
+.cluster-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+/* CLUSTER RESULTS */
+.cluster-results {
+    margin-top: 20px;
+}
+
+.cluster-meta {
+    background: #f8f9fa;
+    padding: 16px;
+    border-radius: 8px;
+    margin-top: 16px;
+}
+
+.cluster-meta p {
+    margin: 6px 0;
+}

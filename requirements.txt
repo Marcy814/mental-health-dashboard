@@ -1,0 +1,50 @@
+# ===================================================================
+# Mental Wellness Dashboard - Requirements
+# Installation: pip install -r requirements.txt
+
+# Core Web Framework
+flask>=2.3.0
+werkzeug>=2.3.0
+
+# Database
+pymongo>=4.5.0
+dnspython>=2.3.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Data Processing (installer AVANT machine learning)
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Utilities
+pillow>=10.0.0
+requests>=2.31.0
+urllib3>=2.0.0
+tqdm>=4.65.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.17.0
+
+# Machine Learning (installer AVANT PyTorch)
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# XGBoost (installer AVANT PyTorch pour éviter conflits)
+xgboost
+
+# Deep Learning - PyTorch CPU (CRITIQUE: installer ensemble avec index spécial)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+
+# NLP & Transformers (installer APRÈS PyTorch)
+transformers>=4.30.0
+tokenizers>=0.13.0
+huggingface-hub>=0.16.0
+
+# Sentence Transformers (EN DERNIER car dépend de tout ce qui précède)
+sentence-transformers>=2.2.0

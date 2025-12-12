@@ -1,0 +1,1083 @@
+/* ===================================================================
+ *  MindCare - JavaScript COMPLET & CORRIGÉ (11 DÉC 2024)
+ * =================================================================== */
+
+(function ($) {
+    'use strict';
+
+    // ---------------------------------------------------------------
+    // CONFIGURATION GLOBALE
+    // ---------------------------------------------------------------
+    const config = {
+        apiBaseUrl: "",
+        animationDuration: 800,
+        mobileBreakpoint: 768
+    };
+
+    // ---------------------------------------------------------------
+    // OUTILS
+    // ---------------------------------------------------------------
+    function debounce(func, wait) {
+        let timeout;
+        return (...args) => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function throttle(func, limit) {
+        let inThrottle;
+        return (...args) => {
+            if (!inThrottle) {
+                func.apply(this, args);
+                inThrottle = true;
+                setTimeout(() => (inThrottle = false), limit);
+            }
+        };
+    }
+
+    // ---------------------------------------------------------------
+    // CLASSE PRINCIPALE
+    // ---------------------------------------------------------------
+    class MindCareApp {
+        constructor() {
+            this.patientsData = [];
+            this.currentClusterModel = "kmeans";
+            this.animationManager = new AnimationManager();
+            this.autocompleteVisible = false;
+            this.init();
+        }
+
+        // -----------------------------------------------------------
+        // 🔵 INITIALISATION
+        // -----------------------------------------------------------
+        init() {
+            this.bindEvents();
+            this.initializeAnimations();
+            this.setupClusterTabs();
+            this.loadClusterGraph('kmeans');
+            this.checkInitialStatus(); // B) Message de chargement
+            this.setupAutocomplete(); // B) Auto-complétion
+        }
+
+        initializeAnimations() {
+            this.typeEffect('.status-text', 'Connexion en cours...', 45);
+        }
+
+        // Effet d'écriture
+        typeEffect(selector, text, speed) {
+            const el = document.querySelector(selector);
+            if (!el) return;
+            let i = 0;
+            el.innerText = "";
+            const timer = setInterval(() => {
+                el.innerText += text.charAt(i);
+                i++;
+                if (i >= text.length) clearInterval(timer);
+            }, speed);
+        }
+
+        // -----------------------------------------------------------
+        // B) VÉRIFIER LE STATUT INITIAL + MESSAGE
+        // -----------------------------------------------------------
+        async checkInitialStatus() {
+            try {
+                const response = await $.ajax({
+                    url: "/api/status",
+                    method: "GET"
+                });
+
+                if (response.status === "success") {
+                    // Afficher le message dans le dashboard
+                    const statusText = document.querySelector('.status-text');
+                    if (statusText) {
+                        statusText.innerText = response.message;
+                        statusText.style.color = "#4CAF50";
+                    }
+
+                    // Mettre à jour le compteur de patients
+                    const patientsCount = document.getElementById('patientsCount');
+                    if (patientsCount && response.patient_count) {
+                        this.animateCounter(patientsCount, 0, response.patient_count, 1500);
+                    }
+
+                    // Afficher une notification success
+                    this.showNotification(response.message, "success");
+                }
+            } catch (err) {
+                console.error("Erreur statut initial:", err);
+                const statusText = document.querySelector('.status-text');
+                if (statusText) {
+                    statusText.innerText = "❌ Connexion échouée";
+                    statusText.style.color = "#f44336";
+                }
+            }
+        }
+
+        // Animation du compteur
+        animateCounter(element, start, end, duration) {
+            const range = end - start;
+            const increment = range / (duration / 16);
+            let current = start;
+
+            const timer = setInterval(() => {
+                current += increment;
+                if (current >= end) {
+                    element.innerText = Math.floor(end);
+                    clearInterval(timer);
+                } else {
+                    element.innerText = Math.floor(current);
+                }
+            }, 16);
+        }
+
+        // -----------------------------------------------------------
+        // B) AUTO-COMPLÉTION
+        // -----------------------------------------------------------
+        setupAutocomplete() {
+            const self = this;
+            const searchInput = $('#searchInput');
+            const autocompleteBox = $('<div id="autocompleteResults" class="autocomplete-box"></div>');
+            searchInput.after(autocompleteBox);
+
+            // Appeler l'auto-complétion lors de la saisie
+            searchInput.on('input', debounce(async function() {
+                const query = $(this).val().trim();
+
+                if (query.length < 1) {
+                    autocompleteBox.hide().html('');
+                    self.autocompleteVisible = false;
+                    return;
+                }
+
+                try {
+                    const response = await $.ajax({
+                        url: `/api/autocomplete?query=${encodeURIComponent(query)}`,
+                        method: "GET"
+                    });
+
+                    if (response.suggestions && response.suggestions.length > 0) {
+                        let html = '';
+                        response.suggestions.forEach(name => {
+                            html += `<div class="autocomplete-item">${name}</div>`;
+                        });
+                        autocompleteBox.html(html).show();
+                        self.autocompleteVisible = true;
+                    } else {
+                        autocompleteBox.hide().html('');
+                        self.autocompleteVisible = false;
+                    }
+                } catch (err) {
+                    console.error("Erreur autocomplete:", err);
+                }
+            }, 200));
+
+            // Cliquer sur une suggestion
+            $(document).on('click', '.autocomplete-item', function() {
+                const name = $(this).text();
+                searchInput.val(name);
+                autocompleteBox.hide().html('');
+                self.autocompleteVisible = false;
+                // Lancer la recherche automatiquement
+                self.handleSearch({ target: searchInput[0] });
+            });
+
+            // Fermer l'autocomplete en cliquant ailleurs
+            $(document).on('click', function(e) {
+                if (!$(e.target).closest('#searchInput, #autocompleteResults').length) {
+                    autocompleteBox.hide();
+                    self.autocompleteVisible = false;
+                }
+            });
+        }
+
+        // -----------------------------------------------------------
+        // 🔵 GESTION DES ÉVÉNEMENTS
+        // -----------------------------------------------------------
+        bindEvents() {
+            // Recherche classique avec debounce pour éviter trop de rafraîchissements
+            $('#searchInput').on('input', debounce(this.handleSearch.bind(this), 600));
+            $('#vectorSearchBtn').on('click', this.handleVectorSearch.bind(this));
+            $('#calculateEDF').on('click', this.handleCalculateEDF.bind(this));
+
+            // CRUD dans les résultats
+            $(document).on('click', '.view-patient', this.handleViewPatient.bind(this));
+            $(document).on('click', '.edit-patient', this.handleEditPatient.bind(this));
+            $(document).on('click', '.delete-patient', this.handleDeletePatient.bind(this)); // D) Nouveau
+            
+            // Boutons de visualisation des clusters
+            $(document).on('click', '.cluster-btn', this.handleClusterClick.bind(this));
+            
+            // CRUD page de gestion
+            $('#btnNewPatient').on('click', this.handleCreatePatient.bind(this));
+            $('#btnExportPatients').on('click', () => this.exportPatients("json"));
+            $('#btnOpenPatients').on('click', () =>
+                $('html,body').animate({ scrollTop: $('#searchResults').offset().top - 60 }, 600)
+            );
+        }
+
+        // -----------------------------------------------------------
+        // C) RECHERCHE CLASSIQUE (AFFICHE 6-7 CHAMPS)
+        // -----------------------------------------------------------
+        async handleSearch(event) {
+            const query = $(event.target).val().trim();
+
+            if (query.length === 0) {
+                $('#searchResults').html('<p class="placeholder">Tapez pour rechercher...</p>');
+                return;
+            }
+
+            if (query.length === 1) return;
+
+            try {
+                this.showLoading("#searchResults");
+
+                const response = await $.ajax({
+                    url: "/api/search",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ query })
+                });
+
+                this.patientsData = response.patients || [];
+                this.displaySearchResults(response);
+
+            } catch (err) {
+                this.showError("Échec de recherche : " + (err.responseJSON?.error || err.message), "#searchResults");
+            } finally {
+                this.hideLoading("#searchResults");
+            }
+        }
+
+        displaySearchResults(response) {
+            const container = $('#searchResults');
+            container.html("");
+
+            if (!response.patients || response.patients.length === 0) {
+                container.html(`<p class="no-results">Aucun résultat trouvé.</p>`);
+                return;
+            }
+
+            let html = `<h4 class="mb-3">${response.message}</h4>`;
+
+            response.patients.forEach(p => {
+                html += this.createPatientCard(p);
+            });
+
+            container.html(html);
+        }
+
+        // C) CORRECTION: Afficher 10 CHAMPS (tous les principaux)
+        createPatientCard(p) {
+            // Formater le revenu avec séparateur de milliers
+            const income = p.Income ? new Intl.NumberFormat('fr-CA', { 
+                style: 'currency', 
+                currency: 'CAD',
+                maximumFractionDigits: 0
+            }).format(p.Income) : "—";
+
+            return `
+                <div class="patient-card">
+                    <div class="header">
+                        <h4>${p.Name || "Nom inconnu"}</h4>
+                        <span class="age-badge">${p.Age || "?"} ans</span>
+                    </div>
+
+                    <div class="details">
+                        <p><b>Statut marital:</b> ${p["Marital Status"] || "—"}</p>
+                        <p><b>Emploi:</b> ${p["Employment Status"] || "—"}</p>
+                        <p><b>Éducation:</b> ${p["Education Level"] || "—"}</p>
+                        <p><b>Enfants:</b> ${p["Number of Children"] || 0}</p>
+                        <p><b>Revenu:</b> ${income}</p>
+                        <p><b>Tabagisme:</b> ${p["Smoking Status"] || "—"}</p>
+                        <p><b>Sommeil:</b> ${p["Sleep Patterns"] || "—"}</p>
+                        <p><b>Activité physique:</b> ${p["Physical Activity Level"] || "—"}</p>
+                        <p><b>Alcool:</b> ${p["Alcohol Consumption"] || "—"}</p>
+                        <p><b>Alimentation:</b> ${p["Dietary Habits"] || "—"}</p>
+                    </div>
+
+                    <div class="actions">
+                        <button class="button small view-patient" data-id="${p._id}">
+                            <i class="icon-eye"></i> Voir
+                        </button>
+                        <button class="button small stroke edit-patient" data-id="${p._id}">
+                            <i class="icon-edit"></i> Modifier
+                        </button>
+                        <button class="button small danger delete-patient" data-id="${p._id}">
+                            <i class="icon-trash"></i> Supprimer
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // -----------------------------------------------------------
+        // A) RECHERCHE VECTORIELLE (CORRIGÉE)
+        // -----------------------------------------------------------
+        async handleVectorSearch() {
+            const query = $('#vectorSearchInput').val().trim();
+            if (!query) {
+                this.showError("Veuillez entrer une description.", "#vectorSearchResults");
+                return;
+            }
+
+            try {
+                this.showLoading("#vectorSearchResults");
+
+                const response = await $.ajax({
+                    url: "/api/vector-search",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ query })
+                });
+
+                this.displayVectorSearchResults(response);
+
+            } catch (err) {
+                console.error("Erreur recherche vectorielle:", err);
+                this.showError("Erreur recherche : " + (err.responseJSON?.error || err.message), "#vectorSearchResults");
+            } finally {
+                this.hideLoading("#vectorSearchResults");
+            }
+        }
+
+        displayVectorSearchResults(response) {
+            const container = $('#vectorSearchResults');
+            container.html("");
+
+            if (!response.results?.length) {
+                container.html("<p>Aucun résultat trouvé.</p>");
+                return;
+            }
+
+            let html = `<h4>${response.message}</h4>`;
+
+            response.results.forEach(r => {
+                html += this.createVectorResultCard(r);
+            });
+
+            container.html(html);
+        }
+
+        createVectorResultCard(r) {
+            const info = r.patient_info || {};
+            const ml = r.ml_predictions || {};
+
+            return `
+                <div class="vector-result-card">
+                    <div class="result-header">
+                        <h4>${info.name || "Inconnu"}</h4>
+                        <span class="similarity-badge">${(info.similarity_score * 100).toFixed(1)}% similaire</span>
+                    </div>
+                    <div class="result-details">
+                        <p><b>Âge:</b> ${info.age || "?"} ans</p>
+                        <p><b>Niveau de risque:</b> <span class="risk-${info.risk_level}">${info.risk_level || "?"}</span></p>
+                        <p><b>Cluster:</b> Groupe ${ml.cluster_group}</p>
+                        <p><b>Probabilité dépression:</b> ${(ml.depression_probability * 100).toFixed(1)}%</p>
+                    </div>
+                    <div class="actions">
+                        <button class="button small view-patient" data-id="${info.id}">Voir détails</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // -----------------------------------------------------------
+        // D) VOIR PATIENT (TOUS LES 16 CHAMPS - ORGANISÉS PAR SECTIONS)
+        // -----------------------------------------------------------
+        async handleViewPatient(e) {
+            const id = $(e.currentTarget).data('id');
+            if (!id) return;
+
+            try {
+                const response = await $.ajax({
+                    url: `/api/patient/${id}`,
+                    method: "GET"
+                });
+
+                const p = response.patient;
+
+                // Formater le revenu
+                const income = p.Income ? new Intl.NumberFormat('fr-CA', { 
+                    style: 'currency', 
+                    currency: 'CAD',
+                    maximumFractionDigits: 2
+                }).format(p.Income) : "Non spécifié";
+
+                // D) CORRECTION: Afficher TOUS les champs organisés par sections
+                Swal.fire({
+                    title: `<i class="icon-user"></i> ${p.Name || "Patient"}`,
+                    html: `
+                        <div style="text-align: left; max-height: 500px; overflow-y: auto; padding: 10px;">
+                            
+                            <!-- Section Informations Générales -->
+                            <div style="background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <h4 style="color: #667eea; margin: 0 0 10px 0; font-size: 1rem;">👤 Informations Générales</h4>
+                                <p style="margin: 5px 0;"><b>Âge:</b> ${p.Age || "—"} ans</p>
+                                <p style="margin: 5px 0;"><b>Statut marital:</b> ${p["Marital Status"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Nombre d'enfants:</b> ${p["Number of Children"] || 0}</p>
+                            </div>
+
+                            <!-- Section Situation Professionnelle -->
+                            <div style="background: linear-gradient(135deg, #f093fb15 0%, #f5576c15 100%); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <h4 style="color: #f5576c; margin: 0 0 10px 0; font-size: 1rem;">💼 Situation Professionnelle</h4>
+                                <p style="margin: 5px 0;"><b>Emploi:</b> ${p["Employment Status"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Éducation:</b> ${p["Education Level"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Revenu annuel:</b> ${income}</p>
+                            </div>
+
+                            <!-- Section Style de Vie -->
+                            <div style="background: linear-gradient(135deg, #4facfe15 0%, #00f2fe15 100%); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <h4 style="color: #4facfe; margin: 0 0 10px 0; font-size: 1rem;">🏃 Style de Vie</h4>
+                                <p style="margin: 5px 0;"><b>Tabagisme:</b> ${p["Smoking Status"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Consommation d'alcool:</b> ${p["Alcohol Consumption"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Activité physique:</b> ${p["Physical Activity Level"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Habitudes alimentaires:</b> ${p["Dietary Habits"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Qualité du sommeil:</b> ${p["Sleep Patterns"] || "—"}</p>
+                            </div>
+
+                            <!-- Section Historique Médical -->
+                            <div style="background: linear-gradient(135deg, #fa709a15 0%, #fee14015 100%); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <h4 style="color: #fa709a; margin: 0 0 10px 0; font-size: 1rem;">🏥 Historique Médical</h4>
+                                <p style="margin: 5px 0;"><b>Historique maladie mentale:</b> ${p["History of Mental Illness"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Historique abus de substances:</b> ${p["History of Substance Abuse"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Historique familial de dépression:</b> ${p["Family History of Depression"] || "—"}</p>
+                                <p style="margin: 5px 0;"><b>Conditions médicales chroniques:</b> ${p["Chronic Medical Conditions"] || "—"}</p>
+                            </div>
+
+                            <!-- ID MongoDB -->
+                            <div style="text-align: center; margin-top: 15px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                                <small style="color: #999; font-family: monospace;">ID: ${p._id}</small>
+                            </div>
+
+                        </div>
+                    `,
+                    width: 700,
+                    confirmButtonText: "Fermer",
+                    confirmButtonColor: "#667eea"
+                });
+
+            } catch (err) {
+                Swal.fire("Erreur", err.responseJSON?.error || "Patient non trouvé", "error");
+            }
+        }
+
+        // -----------------------------------------------------------
+        // D) MODIFIER PATIENT (PLUS DE CHAMPS MODIFIABLES)
+        // -----------------------------------------------------------
+        async handleEditPatient(e) {
+            const id = $(e.currentTarget).data('id');
+
+            try {
+                const response = await $.ajax({
+                    url: `/api/patient/${id}`,
+                    method: "GET"
+                });
+
+                const p = response.patient;
+
+                const { value } = await Swal.fire({
+                    title: `✏️ Modifier: ${p.Name}`,
+                    html: `
+                        <div style="max-height: 500px; overflow-y: auto; text-align: left; padding: 10px;">
+                            
+                            <h4 style="color: #667eea; font-size: 0.95rem; margin: 15px 0 8px 0;">📋 Informations de base</h4>
+                            <label style="font-size: 0.85rem; color: #666;">Âge:</label>
+                            <input id="age" class="swal2-input" type="number" value="${p.Age || ''}" style="width: 90%;">
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Statut marital:</label>
+                            <select id="marital" class="swal2-input" style="width: 90%;">
+                                <option value="Single" ${p["Marital Status"] === "Single" ? "selected" : ""}>Célibataire</option>
+                                <option value="Married" ${p["Marital Status"] === "Married" ? "selected" : ""}>Marié(e)</option>
+                                <option value="Divorced" ${p["Marital Status"] === "Divorced" ? "selected" : ""}>Divorcé(e)</option>
+                                <option value="Widowed" ${p["Marital Status"] === "Widowed" ? "selected" : ""}>Veuf/Veuve</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Nombre d'enfants:</label>
+                            <input id="children" class="swal2-input" type="number" value="${p["Number of Children"] || 0}" style="width: 90%;">
+                            
+                            <h4 style="color: #667eea; font-size: 0.95rem; margin: 15px 0 8px 0;">💼 Situation professionnelle</h4>
+                            <label style="font-size: 0.85rem; color: #666;">Emploi:</label>
+                            <select id="employment" class="swal2-input" style="width: 90%;">
+                                <option value="Employed" ${p["Employment Status"] === "Employed" ? "selected" : ""}>Employé(e)</option>
+                                <option value="Unemployed" ${p["Employment Status"] === "Unemployed" ? "selected" : ""}>Sans emploi</option>
+                                <option value="Student" ${p["Employment Status"] === "Student" ? "selected" : ""}>Étudiant(e)</option>
+                                <option value="Retired" ${p["Employment Status"] === "Retired" ? "selected" : ""}>Retraité(e)</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Éducation:</label>
+                            <select id="education" class="swal2-input" style="width: 90%;">
+                                <option value="High School" ${p["Education Level"] === "High School" ? "selected" : ""}>Secondaire</option>
+                                <option value="Bachelor's Degree" ${p["Education Level"] === "Bachelor's Degree" ? "selected" : ""}>Baccalauréat</option>
+                                <option value="Master's Degree" ${p["Education Level"] === "Master's Degree" ? "selected" : ""}>Maîtrise</option>
+                                <option value="PhD" ${p["Education Level"] === "PhD" ? "selected" : ""}>Doctorat</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Revenu annuel ($):</label>
+                            <input id="income" class="swal2-input" type="number" value="${p.Income || 0}" style="width: 90%;">
+                            
+                            <h4 style="color: #667eea; font-size: 0.95rem; margin: 15px 0 8px 0;">🏃 Style de vie</h4>
+                            <label style="font-size: 0.85rem; color: #666;">Tabagisme:</label>
+                            <select id="smoking" class="swal2-input" style="width: 90%;">
+                                <option value="Non-smoker" ${p["Smoking Status"] === "Non-smoker" ? "selected" : ""}>Non-fumeur</option>
+                                <option value="Former" ${p["Smoking Status"] === "Former" ? "selected" : ""}>Ancien fumeur</option>
+                                <option value="Current" ${p["Smoking Status"] === "Current" ? "selected" : ""}>Fumeur actuel</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Consommation d'alcool:</label>
+                            <select id="alcohol" class="swal2-input" style="width: 90%;">
+                                <option value="Low" ${p["Alcohol Consumption"] === "Low" ? "selected" : ""}>Faible</option>
+                                <option value="Moderate" ${p["Alcohol Consumption"] === "Moderate" ? "selected" : ""}>Modérée</option>
+                                <option value="High" ${p["Alcohol Consumption"] === "High" ? "selected" : ""}>Élevée</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Activité physique:</label>
+                            <select id="activity" class="swal2-input" style="width: 90%;">
+                                <option value="Sedentary" ${p["Physical Activity Level"] === "Sedentary" ? "selected" : ""}>Sédentaire</option>
+                                <option value="Moderate" ${p["Physical Activity Level"] === "Moderate" ? "selected" : ""}>Modérée</option>
+                                <option value="Active" ${p["Physical Activity Level"] === "Active" ? "selected" : ""}>Active</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Qualité du sommeil:</label>
+                            <select id="sleep" class="swal2-input" style="width: 90%;">
+                                <option value="Poor" ${p["Sleep Patterns"] === "Poor" ? "selected" : ""}>Mauvaise</option>
+                                <option value="Fair" ${p["Sleep Patterns"] === "Fair" ? "selected" : ""}>Moyenne</option>
+                                <option value="Good" ${p["Sleep Patterns"] === "Good" ? "selected" : ""}>Bonne</option>
+                                <option value="Excellent" ${p["Sleep Patterns"] === "Excellent" ? "selected" : ""}>Excellente</option>
+                            </select>
+                            
+                            <label style="font-size: 0.85rem; color: #666;">Alimentation:</label>
+                            <select id="dietary" class="swal2-input" style="width: 90%;">
+                                <option value="Unhealthy" ${p["Dietary Habits"] === "Unhealthy" ? "selected" : ""}>Malsaine</option>
+                                <option value="Moderate" ${p["Dietary Habits"] === "Moderate" ? "selected" : ""}>Modérée</option>
+                                <option value="Healthy" ${p["Dietary Habits"] === "Healthy" ? "selected" : ""}>Saine</option>
+                            </select>
+                            
+                        </div>
+                    `,
+                    width: 650,
+                    showCancelButton: true,
+                    confirmButtonText: "💾 Enregistrer",
+                    cancelButtonText: "Annuler",
+                    confirmButtonColor: "#667eea",
+                    cancelButtonColor: "#95a5a6",
+                    preConfirm: () => {
+                        return {
+                            Age: Number($('#age').val()),
+                            "Marital Status": $('#marital').val(),
+                            "Number of Children": Number($('#children').val()),
+                            "Employment Status": $('#employment').val(),
+                            "Education Level": $('#education').val(),
+                            "Income": Number($('#income').val()),
+                            "Smoking Status": $('#smoking').val(),
+                            "Alcohol Consumption": $('#alcohol').val(),
+                            "Physical Activity Level": $('#activity').val(),
+                            "Sleep Patterns": $('#sleep').val(),
+                            "Dietary Habits": $('#dietary').val()
+                        };
+                    }
+                });
+
+                if (value) {
+                    await $.ajax({
+                        url: `/api/patient/${id}`,
+                        method: "PUT",
+                        contentType: "application/json",
+                        data: JSON.stringify(value)
+                    });
+                    
+                    Swal.fire({
+                        title: "Succès!",
+                        text: "✅ Patient mis à jour avec succès",
+                        icon: "success",
+                        confirmButtonColor: "#667eea"
+                    });
+                    
+                    // Rafraîchir la recherche
+                    this.handleSearch({ target: $('#searchInput')[0] });
+                }
+            } catch (err) {
+                Swal.fire("Erreur", err.responseJSON?.error || "Erreur de modification", "error");
+            }
+        }
+
+        // -----------------------------------------------------------
+        // D) SUPPRIMER PATIENT (NOUVEAU)
+        // -----------------------------------------------------------
+        async handleDeletePatient(e) {
+            const id = $(e.currentTarget).data('id');
+            if (!id) return;
+
+            const result = await Swal.fire({
+                title: "Êtes-vous sûr?",
+                text: "Cette action est irréversible!",
+                icon: "warning",
+                showCancelButton: true,
+                confirmButtonColor: "#d33",
+                cancelButtonColor: "#3085d6",
+                confirmButtonText: "Oui, supprimer",
+                cancelButtonText: "Annuler"
+            });
+
+            if (result.isConfirmed) {
+                try {
+                    await $.ajax({
+                        url: `/api/patient/${id}`,
+                        method: "DELETE"
+                    });
+
+                    Swal.fire("Supprimé!", "✅ Le patient a été supprimé.", "success");
+                    
+                    // Rafraîchir la recherche
+                    this.handleSearch({ target: $('#searchInput')[0] });
+
+                } catch (err) {
+                    Swal.fire("Erreur", err.responseJSON?.error || "Erreur de suppression", "error");
+                }
+            }
+        }
+
+        // -----------------------------------------------------------
+        // D) CRÉER PATIENT (TOUS LES 16 CHAMPS OBLIGATOIRES)
+        // -----------------------------------------------------------
+        async handleCreatePatient() {
+            const { value } = await Swal.fire({
+                title: "📝 Nouveau patient - Tous les champs obligatoires",
+                html: `
+                    <div style="text-align: left; max-height: 500px; overflow-y: auto; padding: 10px;">
+                        
+                        <h4 style="color: #667eea; font-size: 1rem; margin: 15px 0 8px 0;">📋 Informations de base</h4>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Nom complet *:</label>
+                        <input id="name" class="swal2-input" placeholder="Ex: John Doe" style="width: 90%;">
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Âge *:</label>
+                        <input id="age" class="swal2-input" type="number" placeholder="Ex: 35" style="width: 90%;">
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Statut marital *:</label>
+                        <select id="marital" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Single">Célibataire</option>
+                            <option value="Married">Marié(e)</option>
+                            <option value="Divorced">Divorcé(e)</option>
+                            <option value="Widowed">Veuf/Veuve</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Nombre d'enfants *:</label>
+                        <input id="children" class="swal2-input" type="number" placeholder="Ex: 0" value="0" style="width: 90%;">
+                        
+                        <h4 style="color: #667eea; font-size: 1rem; margin: 15px 0 8px 0;">💼 Situation professionnelle</h4>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Emploi *:</label>
+                        <select id="employment" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Employed">Employé(e)</option>
+                            <option value="Unemployed">Sans emploi</option>
+                            <option value="Student">Étudiant(e)</option>
+                            <option value="Retired">Retraité(e)</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Éducation *:</label>
+                        <select id="education" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="High School">Secondaire</option>
+                            <option value="Bachelor's Degree">Baccalauréat</option>
+                            <option value="Master's Degree">Maîtrise</option>
+                            <option value="PhD">Doctorat</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Revenu annuel ($) *:</label>
+                        <input id="income" class="swal2-input" type="number" placeholder="Ex: 50000" style="width: 90%;">
+                        
+                        <h4 style="color: #667eea; font-size: 1rem; margin: 15px 0 8px 0;">🏃 Style de vie</h4>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Tabagisme *:</label>
+                        <select id="smoking" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Non-smoker">Non-fumeur</option>
+                            <option value="Former">Ancien fumeur</option>
+                            <option value="Current">Fumeur actuel</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Consommation d'alcool *:</label>
+                        <select id="alcohol" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Low">Faible</option>
+                            <option value="Moderate">Modérée</option>
+                            <option value="High">Élevée</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Activité physique *:</label>
+                        <select id="activity" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Sedentary">Sédentaire</option>
+                            <option value="Moderate">Modérée</option>
+                            <option value="Active">Active</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Habitudes alimentaires *:</label>
+                        <select id="dietary" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Unhealthy">Malsaine</option>
+                            <option value="Moderate">Modérée</option>
+                            <option value="Healthy">Saine</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Qualité du sommeil *:</label>
+                        <select id="sleep" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Poor">Mauvaise</option>
+                            <option value="Fair">Moyenne</option>
+                            <option value="Good">Bonne</option>
+                            <option value="Excellent">Excellente</option>
+                        </select>
+                        
+                        <h4 style="color: #667eea; font-size: 1rem; margin: 15px 0 8px 0;">🏥 Historique médical</h4>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Historique maladie mentale *:</label>
+                        <select id="mental" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Yes">Oui</option>
+                            <option value="No">Non</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Historique abus de substances *:</label>
+                        <select id="substance" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Yes">Oui</option>
+                            <option value="No">Non</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Historique familial de dépression *:</label>
+                        <select id="family" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Yes">Oui</option>
+                            <option value="No">Non</option>
+                        </select>
+                        
+                        <label style="font-size: 0.85rem; color: #666;">Conditions médicales chroniques *:</label>
+                        <select id="chronic" class="swal2-input" style="width: 90%;">
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Yes">Oui</option>
+                            <option value="No">Non</option>
+                        </select>
+                        
+                    </div>
+                `,
+                width: 700,
+                showCancelButton: true,
+                confirmButtonText: "✅ Créer le patient",
+                cancelButtonText: "Annuler",
+                confirmButtonColor: "#667eea",
+                cancelButtonColor: "#95a5a6",
+                preConfirm: () => {
+                    const name = $('#name').val().trim();
+                    const age = $('#age').val();
+                    const marital = $('#marital').val();
+                    const employment = $('#employment').val();
+                    const education = $('#education').val();
+                    const income = $('#income').val();
+                    const smoking = $('#smoking').val();
+                    const alcohol = $('#alcohol').val();
+                    const activity = $('#activity').val();
+                    const dietary = $('#dietary').val();
+                    const sleep = $('#sleep').val();
+                    const mental = $('#mental').val();
+                    const substance = $('#substance').val();
+                    const family = $('#family').val();
+                    const chronic = $('#chronic').val();
+                    
+                    // Validation: TOUS les champs sont obligatoires
+                    if (!name || !age || !marital || !employment || !education || !income || 
+                        !smoking || !alcohol || !activity || !dietary || !sleep || 
+                        !mental || !substance || !family || !chronic) {
+                        Swal.showValidationMessage('⚠️ Tous les champs marqués * sont obligatoires');
+                        return false;
+                    }
+
+                    return {
+                        Name: name,
+                        Age: Number(age),
+                        "Marital Status": marital,
+                        "Employment Status": employment,
+                        "Education Level": education,
+                        "Number of Children": Number($('#children').val()) || 0,
+                        Income: Number(income),
+                        "Smoking Status": smoking,
+                        "Alcohol Consumption": alcohol,
+                        "Physical Activity Level": activity,
+                        "Dietary Habits": dietary,
+                        "Sleep Patterns": sleep,
+                        "History of Mental Illness": mental,
+                        "History of Substance Abuse": substance,
+                        "Family History of Depression": family,
+                        "Chronic Medical Conditions": chronic
+                    };
+                }
+            });
+
+            if (value) {
+                try {
+                    const response = await $.ajax({
+                        url: "/api/patient",
+                        method: "POST",
+                        contentType: "application/json",
+                        data: JSON.stringify(value)
+                    });
+
+                    Swal.fire("Succès", response.message || "✅ Patient créé avec succès", "success");
+                    
+                    // Optionnel: Rafraîchir la recherche pour voir le nouveau patient
+                    this.handleSearch({ target: $('#searchInput')[0] });
+
+                } catch (err) {
+                    Swal.fire("Erreur", err.responseJSON?.error || "Erreur de création", "error");
+                }
+            }
+        }
+
+        // -----------------------------------------------------------
+        // EDF (AVEC INTERPRÉTATION)
+        // -----------------------------------------------------------
+        async handleCalculateEDF() {
+            const variable = $('#edfVariable').val();
+
+            try {
+                this.showLoading("#edfResults");
+
+                const response = await $.ajax({
+                    url: "/api/statistics/edf",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ variable })
+                });
+
+                const imgSrc = `data:image/png;base64,${response.edf_image}`;
+                const stats = response.statistics;
+
+                let html = `
+                    <div class="edf-result">
+                        <img src="${imgSrc}" alt="EDF Graph" style="width: 100%; border-radius: 8px;">
+                        
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">Moyenne</span>
+                                <span class="stat-value">${stats.mean}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Écart-type</span>
+                                <span class="stat-value">${stats.std}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Médiane</span>
+                                <span class="stat-value">${stats.median}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Min / Max</span>
+                                <span class="stat-value">${stats.min} / ${stats.max}</span>
+                            </div>
+                        </div>
+
+                        ${response.interpretation ? `
+                            <div class="interpretation-box">
+                                <h4>📊 Interprétation</h4>
+                                <div class="interpretation-text">${response.interpretation.replace(/\n/g, '<br>')}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+
+                $('#edfResults').html(html);
+
+            } catch (err) {
+                this.showError("Erreur EDF : " + (err.responseJSON?.error || err.message), "#edfResults");
+            } finally {
+                this.hideLoading("#edfResults");
+            }
+        }
+
+        // -----------------------------------------------------------
+        // EXPORT
+        // -----------------------------------------------------------
+        exportPatients(format) {
+            if (!this.patientsData?.length) {
+                this.showError("Aucune donnée à exporter.");
+                return;
+            }
+
+            const blob = new Blob(
+                [JSON.stringify(this.patientsData, null, 2)],
+                { type: "application/json" }
+            );
+
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `patients_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+
+            this.showNotification("✅ Export réussi!", "success");
+        }
+
+        // -----------------------------------------------------------
+        // UTILITAIRES
+        // -----------------------------------------------------------
+        showLoading(sel) {
+            $(sel).html('<div class="loading-spinner"><div class="spinner"></div><p>Chargement...</p></div>');
+        }
+
+        hideLoading(sel) {
+            // Ne rien faire - le contenu remplacera le spinner
+        }
+
+        showError(msg, sel = "body") {
+            const $container = $(sel);
+            $container.html(`
+                <div class="error-message">
+                    <i class="icon-warning"></i>
+                    <span>${msg}</span>
+                </div>
+            `);
+        }
+
+        showNotification(msg, type = "info") {
+            const bgColor = type === "success" ? "#4CAF50" : type === "error" ? "#f44336" : "#2196F3";
+            
+            const $notif = $(`
+                <div class="notification" style="
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: ${bgColor};
+                    color: white;
+                    padding: 15px 25px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                    z-index: 10000;
+                    animation: slideInRight 0.3s ease;
+                ">
+                    ${msg}
+                </div>
+            `);
+
+            $('body').append($notif);
+
+            setTimeout(() => {
+                $notif.fadeOut(300, () => $notif.remove());
+            }, 3000);
+        }
+
+        // -----------------------------------------------------------
+        // CLUSTERS (graphique ML)
+        // -----------------------------------------------------------
+        setupClusterTabs() {
+            const self = this;
+
+            $(document).on("click", ".cluster-btn", async function (e) {
+                e.preventDefault();
+                const model = $(this).data("model") || "kmeans";
+                self.currentClusterModel = model;
+
+                $(".cluster-btn").removeClass("active");
+                $(this).addClass("active");
+
+                await self.loadClusterGraph(model);
+            });
+        }
+
+        async loadClusterGraph(model = "kmeans") {
+            let $container = $("#clusterResults");
+            if (!$container.length) {
+                $container = $(".chart-box");
+            }
+
+            if (!$container.length) {
+                console.warn("Aucun conteneur de clusters trouvé.");
+                return;
+            }
+
+            $container.html(`
+                <div class="loading-clusters" style="text-align:center; padding:2rem;">
+                    <div class="spinner" style="margin-bottom:1rem;"></div>
+                    <p>Chargement des clusters (${model})…</p>
+                </div>
+            `);
+
+            try {
+                const response = await $.ajax({
+                    url: `/api/analytics/clusters?model=${encodeURIComponent(model)}`,
+                    method: "GET"
+                });
+
+                if (response.error) {
+                    $container.html(`
+                        <div class="error-message">
+                            <i class="icon-warning"></i>
+                            <p>${response.error}</p>
+                        </div>
+                    `);
+                    return;
+                }
+
+                const imgSrc = response.image && response.image.startsWith("data:")
+                    ? response.image
+                    : `data:image/png;base64,${response.image || ""}`;
+
+                $container.html(`
+                    <div class="cluster-results" style="animation: fadeInUp 0.6s ease forwards;">
+                        <img src="${imgSrc}"
+                             alt="Clusters ${response.model_type || model}"
+                             style="width:100%; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.15);">
+                        <div class="cluster-meta" style="margin-top:1rem; font-size:0.9rem; color:#666;">
+                            <p><strong>Modèle:</strong> ${response.model_type || model}</p>
+                            <p><strong>Points utilisés:</strong> ${response.n_points || "N/A"}</p>
+                            ${response.x_axis && response.y_axis ? `
+                                <p><strong>Axes:</strong> ${response.x_axis} vs ${response.y_axis}</p>
+                            ` : ""}
+                        </div>
+                    </div>
+                `);
+
+            } catch (e) {
+                console.error("Erreur graphique clusters:", e);
+                $container.html(`
+                    <div class="error-message">
+                        <i class="icon-warning"></i>
+                        <p>Erreur lors du chargement du graphique de clusters.</p>
+                    </div>
+                `);
+            }
+        }
+
+        handleClusterClick(e) {
+            const model = $(e.currentTarget).data('model');
+            this.loadClusterGraph(model);
+        }
+    }
+
+    // -----------------------------------------------------------
+    // ANIMATION MANAGER
+    // -----------------------------------------------------------
+    class AnimationManager {
+        constructor() {
+            this.observeAnimations();
+        }
+
+        observeAnimations() {
+            const obs = new IntersectionObserver((entries) => {
+                entries.forEach(e => {
+                    if (e.isIntersecting) {
+                        e.target.classList.add("fade-in");
+                    }
+                });
+            });
+
+            document.querySelectorAll(".section, .patient-card").forEach(el => obs.observe(el));
+        }
+    }
+
+    // Lancer l'app
+    $(document).ready(() => {
+        window.app = new MindCareApp();
+    });
+
+})(jQuery);

@@ -1,0 +1,527 @@
+# ============================================================
+#  app.py — VERSION 100% CORRIGÉE POUR PRÉSENTATION DU 11 DÉC
+# ============================================================
+
+from flask import Flask, render_template, request, jsonify
+from pymongo import MongoClient
+from bson import ObjectId
+import json
+import numpy as np
+import pandas as pd
+import re
+import base64
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from io import BytesIO
+from scipy.stats import norm
+
+from config import Config
+from models.ml_models import MentalHealthAnalyzer
+
+# -----------------------------------------------------------
+# INITIALISATION FLASK
+# -----------------------------------------------------------
+
+app = Flask(__name__)
+app.config.from_object(Config)
+app.secret_key = Config.SECRET_KEY
+
+
+# -----------------------------------------------------------
+# CONNEXION MONGO
+# -----------------------------------------------------------
+
+def get_database_connection():
+    try:
+        client = MongoClient(
+            Config.MONGO_URI,
+            tls=True,
+            tlsAllowInvalidCertificates=True,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=10000
+        )
+        db = client[Config.DATABASE_NAME]
+        collection = db[Config.COLLECTION_NAME]
+        client.admin.command("ping")
+        print("✅ Connexion MongoDB OK")
+        return collection
+    except Exception as e:
+        print(f"❌ Erreur connexion MongoDB : {e}")
+        return None
+
+
+# -----------------------------------------------------------
+# JSON ENCODER POUR OBJECTID
+# -----------------------------------------------------------
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
+app.json_encoder = JSONEncoder
+
+
+def serialize_document(doc):
+    """Convertit un document MongoDB en dict JSON-compatible avec TOUS les champs"""
+    if not doc:
+        return None
+    doc = dict(doc)
+    if "_id" in doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+# -----------------------------------------------------------
+# INITIALISATION MODELES ML
+# -----------------------------------------------------------
+
+ml_analyzer = MentalHealthAnalyzer()
+
+
+# -----------------------------------------------------------
+# ROUTE ACCUEIL
+# -----------------------------------------------------------
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+# ============================================================
+# A) AUTO-COMPLÉTION (NOUVELLE FONCTIONNALITÉ)
+# ============================================================
+
+@app.route("/api/autocomplete", methods=["GET"])
+def autocomplete():
+    """
+    Retourne les 10 premiers noms de patients correspondant à la requête.
+    Utilisé pour l'auto-complétion dans la barre de recherche.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        query = request.args.get("query", "").strip()
+        
+        if len(query) < 1:
+            return jsonify({"suggestions": []})
+
+        # Recherche sur le nom uniquement pour l'auto-complétion
+        regex = {"$regex": f"^{re.escape(query)}", "$options": "i"}
+        results = collection.find(
+            {"Name": regex},
+            {"Name": 1, "_id": 0}
+        ).limit(10)
+
+        suggestions = [r["Name"] for r in results if "Name" in r]
+        
+        return jsonify({"suggestions": suggestions})
+
+    except Exception as e:
+        print("Erreur autocomplete =", e)
+        return jsonify({"error": "Erreur auto-complétion"}), 500
+
+
+# ============================================================
+# B) MESSAGE DE CHARGEMENT INITIAL
+# ============================================================
+
+@app.route("/api/status", methods=["GET"])
+def check_status():
+    """
+    Vérifie si MongoDB est connecté et retourne un message.
+    Utilisé au chargement de la page.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({
+                "status": "error",
+                "message": "❌ Connexion MongoDB échouée"
+            }), 500
+
+        count = collection.count_documents({})
+        
+        return jsonify({
+            "status": "success",
+            "message": f"✅ Les données ont été chargées avec succès. {count} patients disponibles. Commencez à taper pour rechercher!",
+            "patient_count": count
+        })
+
+    except Exception as e:
+        print("Erreur status =", e)
+        return jsonify({
+            "status": "error",
+            "message": "❌ Erreur de connexion"
+        }), 500
+
+
+# ============================================================
+# C) RECHERCHE CLASSIQUE (CORRIGÉE - TOUS LES CHAMPS)
+# ============================================================
+
+@app.route("/api/search", methods=["POST"])
+def search_patients():
+    """
+    Recherche dans TOUS les champs textuels et numériques.
+    Retourne TOUS les champs du patient (pas seulement 3).
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        data = request.get_json() or {}
+        query_text = (data.get("query") or "").strip()
+
+        # Aucun texte → renvoie 10 patients
+        if not query_text:
+            cursor = collection.find().limit(10)
+            return jsonify({
+                "message": "Commencez à taper pour rechercher.",
+                "patients": [serialize_document(p) for p in cursor]
+            })
+
+        regex = {"$regex": f".*{re.escape(query_text)}.*", "$options": "i"}
+
+        # CORRECTION: Recherche dans TOUS les champs textuels
+        searchable_fields = [
+            "Name", 
+            "Marital Status", 
+            "Employment Status",
+            "Education Level", 
+            "Alcohol Consumption",
+            "Sleep Patterns", 
+            "Family History of Depression",
+            "Smoking Status",
+            "Physical Activity Level",
+            "Dietary Habits",
+            "History of Mental Illness",
+            "History of Substance Abuse",
+            "Chronic Medical Conditions"
+        ]
+
+        or_conditions = [{field: regex} for field in searchable_fields]
+
+        # Recherche numérique
+        if query_text.isdigit():
+            num = int(query_text)
+            or_conditions.extend([
+                {"Age": num},
+                {"Number of Children": num},
+                {"Income": num}
+            ])
+
+        results = list(collection.find({"$or": or_conditions}).limit(10))
+
+        return jsonify({
+            "message": f"{len(results)} résultats trouvés",
+            "patients": [serialize_document(r) for r in results]
+        })
+
+    except Exception as e:
+        print("Erreur search =", e)
+        return jsonify({"error": "Erreur recherche"}), 500
+
+
+# ============================================================
+# D) CRUD PATIENT COMPLET
+# ============================================================
+
+@app.route("/api/patient", methods=["POST"])
+def create_patient():
+    """
+    CORRECTION: Ajout réel dans MongoDB - TOUS les champs OBLIGATOIRES sans defaults.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        data = request.get_json() or {}
+        
+        # Validation: TOUS les 16 champs sont obligatoires
+        required = [
+            "Name", "Age", "Marital Status", "Employment Status", "Education Level",
+            "Number of Children", "Income", "Smoking Status", "Alcohol Consumption",
+            "Physical Activity Level", "Dietary Habits", "Sleep Patterns",
+            "History of Mental Illness", "History of Substance Abuse",
+            "Family History of Depression", "Chronic Medical Conditions"
+        ]
+        
+        missing = [f for f in required if f not in data or data[f] == ""]
+        if missing:
+            return jsonify({"error": f"⚠️ Champs manquants : {', '.join(missing)}"}), 400
+
+        # PAS de valeurs par défaut - utiliser exactement ce qui est fourni
+        patient_data = data
+
+        # Insertion dans MongoDB
+        result = collection.insert_one(patient_data)
+        new_patient = collection.find_one({"_id": result.inserted_id})
+
+        return jsonify({
+            "message": "✅ Patient créé avec succès",
+            "patient": serialize_document(new_patient)
+        }), 201
+
+    except Exception as e:
+        print("Erreur création patient =", e)
+        return jsonify({"error": f"Erreur création: {str(e)}"}), 500
+
+
+@app.route("/api/patient/<id>", methods=["GET", "PUT", "DELETE"])
+def manage_patient(id):
+    """
+    GET: Retourne TOUS les champs du patient
+    PUT: Met à jour réellement dans MongoDB
+    DELETE: Supprime réellement de MongoDB
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        try:
+            oid = ObjectId(id)
+        except:
+            return jsonify({"error": "ID invalide"}), 400
+
+        # GET - Récupérer TOUS les champs
+        if request.method == "GET":
+            patient = collection.find_one({"_id": oid})
+            if not patient:
+                return jsonify({"error": "Patient non trouvé"}), 404
+            return jsonify({"patient": serialize_document(patient)})
+
+        # PUT - Modifier réellement
+        if request.method == "PUT":
+            data = request.get_json() or {}
+            if not data:
+                return jsonify({"error": "Aucune donnée à modifier"}), 400
+
+            # Mise à jour dans MongoDB
+            result = collection.update_one({"_id": oid}, {"$set": data})
+            
+            if result.matched_count == 0:
+                return jsonify({"error": "Patient non trouvé"}), 404
+
+            updated = collection.find_one({"_id": oid})
+            return jsonify({
+                "message": "✅ Patient modifié avec succès",
+                "patient": serialize_document(updated)
+            })
+
+        # DELETE - Supprimer réellement
+        if request.method == "DELETE":
+            result = collection.delete_one({"_id": oid})
+            
+            if result.deleted_count == 0:
+                return jsonify({"error": "Patient non trouvé"}), 404
+
+            return jsonify({"message": "✅ Patient supprimé avec succès"})
+
+    except Exception as e:
+        print("Erreur CRUD =", e)
+        return jsonify({"error": f"Erreur CRUD: {str(e)}"}), 500
+
+
+# ============================================================
+# A) RECHERCHE VECTORIELLE (CORRIGÉE)
+# ============================================================
+
+@app.route("/api/vector-search", methods=["POST"])
+def api_vector_search():
+    """
+    CORRECTION MAJEURE: Récupération des patients MongoDB
+    avant d'appeler find_similar_patients.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        data = request.get_json() or {}
+        query = (data.get("query") or "").strip()
+
+        if not query:
+            return jsonify({"error": "Requête vide"}), 400
+
+        # Récupérer TOUS les patients de MongoDB
+        mongo_patients = list(collection.find().limit(100))
+        
+        if not mongo_patients:
+            return jsonify({"error": "Aucun patient dans la base"}), 404
+
+        # Entraîner les modèles si nécessaire
+        if not ml_analyzer.is_trained:
+            ml_analyzer.train_models(mongo_patients)
+
+        # Générer l'embedding de la requête
+        embedding = ml_analyzer.generate_embedding(query)
+        
+        # CORRECTION: Passer les deux arguments
+        similar = ml_analyzer.find_similar_patients(embedding, mongo_patients, top_k=10)
+        
+        # Appliquer les modèles ML
+        enhanced = ml_analyzer.apply_ml_models(similar)
+
+        return jsonify({
+            "message": f"✅ {len(enhanced)} résultats pour : {query}",
+            "results": enhanced
+        })
+
+    except Exception as e:
+        print("Erreur vector search =", e)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur recherche vectorielle: {str(e)}"}), 500
+
+
+# ============================================================
+# EDF / CDF AVEC INTERPRÉTATION
+# ============================================================
+
+@app.route("/api/statistics/edf", methods=["POST"])
+def calculate_edf():
+    """
+    Calcule EDF/CDF avec interprétation automatique en 3 lignes.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "MongoDB indisponible"}), 500
+
+        data = request.get_json()
+        variable = data.get("variable", "Age")
+
+        docs = list(collection.find({variable: {"$exists": True}}))
+        values = [d[variable] for d in docs if isinstance(d[variable], (int, float))]
+
+        if len(values) < 2:
+            return jsonify({"error": "Données insuffisantes"}), 400
+
+        values = np.sort(values)
+        n = len(values)
+
+        edf = np.arange(1, n + 1) / n
+        mean = np.mean(values)
+        std = np.std(values)
+        cdf = norm.cdf(values, mean, std)
+
+        # Plot
+        plt.figure(figsize=(7, 5))
+        plt.plot(values, edf, label="EDF (Empirique)", marker="o", markersize=3, linewidth=2)
+        plt.plot(values, cdf, label="CDF (Normale théorique)", linestyle="--", linewidth=2)
+        plt.legend(loc="best")
+        plt.title(f"Fonction de Distribution — {variable}")
+        plt.xlabel(variable)
+        plt.ylabel("Probabilité cumulative")
+        plt.grid(True, alpha=0.3)
+
+        buf = BytesIO()
+        plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+        buf.seek(0)
+        img_b64 = base64.b64encode(buf.read()).decode()
+        plt.close()
+
+        # INTERPRÉTATION AUTOMATIQUE
+        median_val = np.median(values)
+        q1 = np.percentile(values, 25)
+        q3 = np.percentile(values, 75)
+
+        interpretation = f"""
+📊 **Interprétation du graphe EDF pour {variable}:**
+
+1. **Tendance centrale**: La médiane est {median_val:.1f}, ce qui signifie que 50% des patients ont une valeur ≤ {median_val:.1f}.
+
+2. **Dispersion**: L'écart entre Q1 ({q1:.1f}) et Q3 ({q3:.1f}) montre une dispersion de {q3-q1:.1f} unités pour les 50% centraux.
+
+3. **Comparaison EDF vs CDF**: L'écart entre les courbes indique si la distribution réelle s'éloigne d'une distribution normale théorique.
+        """.strip()
+
+        return jsonify({
+            "variable": variable,
+            "edf_image": img_b64,
+            "interpretation": interpretation,
+            "statistics": {
+                "mean": round(mean, 2),
+                "std": round(std, 2),
+                "median": round(median_val, 2),
+                "min": float(np.min(values)),
+                "max": float(np.max(values)),
+                "q1": round(q1, 2),
+                "q3": round(q3, 2)
+            }
+        })
+
+    except Exception as e:
+        print("Erreur EDF =", e)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur EDF: {str(e)}"}), 500
+
+
+# ============================================================
+# VISUALISATION DES CLUSTERS ML
+# ============================================================
+
+@app.route("/api/analytics/clusters", methods=["GET"])
+def get_ml_clusters():
+    """
+    Génère un graphique de clusters à partir des données MongoDB.
+    """
+    try:
+        collection = get_database_connection()
+        if collection is None:
+            return jsonify({"error": "Base de données non disponible"}), 500
+
+        model_type = request.args.get("model", "kmeans")
+
+        patients = list(
+            collection.find(
+                {},
+                {
+                    "_id": 0,
+                    "Age": 1,
+                    "Income": 1,
+                    "Number of Children": 1,
+                },
+            )
+        )
+
+        if not patients:
+            return jsonify({"error": "Aucune donnée disponible pour les clusters"}), 404
+
+        df = pd.DataFrame(patients)
+
+        cluster_info = ml_analyzer.generate_cluster_plot(df, model_type=model_type)
+
+        if "error" in cluster_info:
+            return jsonify(cluster_info), 400
+
+        return jsonify(cluster_info)
+
+    except Exception as e:
+        print(f"Erreur clusters: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur clusters: {str(e)}"}), 500
+
+
+# ============================================================
+# LANCEMENT SERVEUR
+# ============================================================
+
+if __name__ == "__main__":
+    try:
+        ml_analyzer.initialize_models()
+        print("🎯 Modèles ML chargés")
+    except Exception as e:
+        print("Erreur init ML =", e)
+
+    app.run(debug=True, host="0.0.0.0", port=5000)
